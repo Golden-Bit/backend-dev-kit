@@ -1,428 +1,329 @@
-Di seguito trovi una **documentazione completa e dettagliata**, in italiano, di tutte le procedure che abbiamo seguito per configurare, integrare e utilizzare Amazon Cognito con un backend Python sviluppato in FastAPI. Questa guida contiene i passaggi step-by-step: dalla creazione di un account AWS, alla configurazione della **User Pool**, fino all’implementazione delle **API** per la gestione di utenti, attributi e token.
+# **Documentazione Completa: Cognito Authentication & MFA API**
+
+## **Indice**
+1. [Descrizione Generale dell’API](#descrizione-generale)  
+2. [Architettura e File Principali](#architettura)  
+3. [Setup e Avvio dell’Applicazione](#setup)  
+4. [Router “User”](#router-user)  
+   - Modelli principali  
+   - Endpoint di registrazione, autenticazione, gestione attributi, password e altro  
+5. [Router “Admin”](#router-admin)  
+   - Modello e endpoint di conferma utente e visualizzazione schema attributi  
+6. [Router “MFA”](#router-mfa)  
+   - Endpoint per SMS/TOTP e flussi di challenge  
+7. [Esempi di utilizzo via cURL/Postman](#esempi-di-utilizzo)  
+8. [Considerazioni su Sicurezza e Best Practices](#best-practices)  
+9. [Errori Comuni e Soluzioni](#errori-comuni)  
+10. [Conclusioni](#conclusioni)
 
 ---
 
-# Documentazione Dettagliata su Amazon Cognito e Integrazione con FastAPI
+## 1. <a name="descrizione-generale"></a>Descrizione Generale dell’API
 
-## 1. Creazione e Configurazione di un Account AWS
+Questa API, sviluppata con **FastAPI**, si integra con **Amazon Cognito** per gestire:
 
-1. **Registrazione su AWS (se necessario)**  
-   - Vai su [aws.amazon.com](https://aws.amazon.com/) e crea un account.  
-   - Inserisci i dati richiesti (informazioni personali, metodo di pagamento, ecc.).  
-   - Al termine, avrai accesso alla console di gestione AWS.
+- **Registrazione e conferma** utenti (sia self-service che admin).  
+- **Login** (flusso `USER_PASSWORD_AUTH`) con eventuale MFA.  
+- **Aggiornamento attributi** (email, telefono, attributi custom).  
+- **Gestione password** (cambio password autenticato, forgot/confirm forgot).  
+- **Verifica e decodifica token JWT**.  
+- **Conferma e visualizzazione dello schema attributi** (via admin).  
+- **Configurazione MFA** (abilitazione/disabilitazione SMS e TOTP).  
 
-2. **Accesso alla Console di Gestione**  
-   - Dirigiti su [console.aws.amazon.com](https://console.aws.amazon.com/).  
-   - Assicurati di utilizzare un utente IAM con i permessi necessari (preferibilmente **AdministratorAccess** se stai solamente sperimentando, oppure permessi più granulari se sei in produzione).
+### Base URL
 
----
+Se l’applicazione gira in locale sulla porta 8000, l’indirizzo base è:  
+```
+http://localhost:8000
+```
 
-## 2. Configurazione di Amazon Cognito
-
-### 2.1. Creazione della User Pool
-
-1. **Accedi al servizio Cognito**  
-   - Nella barra di ricerca della console AWS, digita “Cognito” e seleziona **Amazon Cognito**.
-2. **Creazione di una User Pool**  
-   - Clicca su **Manage User Pools** e poi su **Create a user pool**.  
-   - Assegna un nome significativo, ad esempio `sxu1it` (oppure un altro nome a piacere).
-3. **Configurazione degli attributi**  
-   - Durante la procedura guidata, puoi scegliere se abilitare l’email o il numero di telefono come attributi primari.  
-   - Se desideri che l’email sia un attributo univoco, puoi abilitare l’opzione che rende l’email un alias univoco.  
-   - Puoi anche definire attributi aggiuntivi (custom), ad esempio `custom:department`, `custom:role`, ecc.  
-4. **Impostazioni di sicurezza**  
-   - Configura la policy delle password (lunghezza minima, complessità, ecc.).  
-   - Decidi se abilitare MFA (Multi-Factor Authentication).  
-5. **Verifica degli utenti**  
-   - Scegli se inviare un codice di verifica via email o SMS per confermare gli utenti.  
-   - Verifica di avere correttamente impostato l’indirizzo “FROM” o il servizio Amazon SES se vuoi personalizzare la posta in uscita.
-6. **Creazione conclusiva**  
-   - Fai clic su **Create Pool**.  
-   - Prendi nota del **User Pool ID** e, se necessario, del relativo **ARN**.
-
-### 2.2. Creazione di un App Client
-
-1. **All’interno della User Pool**, vai su **App clients** e seleziona **Add an app client**.  
-   - Dai un nome (es. `test_0`).
-   - Se vuoi usare flussi server-to-server, puoi **disabilitare** la generazione del client secret, ma se lo abiliti, Cognito richiederà l’invio di un `SecretHash`.
-2. **Abilitazione dei flussi di autenticazione**  
-   - Assicurati di spuntare **USER_PASSWORD_AUTH** se desideri autenticare gli utenti con username e password (flusso tipico).  
-   - Salva e prendi nota del **Client ID** (e del **Client secret**, se l’hai abilitato).
-3. **Dominio Cognito (opzionale)**  
-   - Se vuoi usare il **Hosted UI** o i flussi OAuth2 integrati, configura un dominio (AWS fornisce un dominio di default `your-domain.auth.region.amazoncognito.com`, oppure ne puoi usare uno personalizzato).
-
----
-
-## 3. Preparazione dell’Ambiente di Sviluppo Python
-
-1. **Installazione di Python 3**  
-   - Assicurati di avere Python 3 installato.  
-   - Se usi `venv`, crea e attiva un ambiente virtuale.
-2. **Installazione delle librerie necessarie**  
-   ```bash
-   pip install fastapi uvicorn boto3 python-jose requests
-   ```
-   - **fastapi**: framework per le nostre API.  
-   - **uvicorn**: server ASGI leggero per eseguire l’app.  
-   - **boto3**: SDK AWS per Python.  
-   - **python-jose**: libreria per lavorare con i token JWT.  
-   - **requests**: libreria HTTP per richieste esterne (utilizzata ad esempio per scaricare le JWKS).
-
-3. **Configurazione delle Credenziali AWS**  
-   - Crea o modifica il file `~/.aws/credentials` (o usa variabili d’ambiente).  
-   - Verifica di avere i permessi necessari per interagire con Cognito (`AmazonCognitoIdentityProviderFullAccess`, o equivalenti).
-
----
-
-## 4. Integrazione Cognito-Python con FastAPI
-
-### 4.1. Il codice di base
-
-Di seguito riportiamo un **esempio completo** di codice FastAPI che include:
-
-1. **Registrazione (signup)** con calcolo del `SecretHash`.
-2. **Autenticazione (signin)** con il flusso `USER_PASSWORD_AUTH`.
-3. **Conferma utente** (sia lato utente con codice, sia lato admin).
-4. **Resend confirmation code** per rinviare il codice di conferma.
-5. **Update degli attributi** (sia standard che custom).
-6. **Get user info** con l’access token.  
-7. **Verifica dei token JWT**.  
-8. **Visualizzazione schema attributi**.  
-9. **Tentativo di aggiornamento schema attributi** (non supportato da Cognito).
-
-Salva il seguente codice in un file, ad esempio `main.py`:
-
-```python
-from fastapi import FastAPI, HTTPException, Body
-from pydantic import BaseModel, Field
-from typing import List, Dict
-import boto3
-import requests
-from jose import jwt
-import hmac
-import hashlib
-import base64
-
-app = FastAPI(
-    title="Cognito User Management API",
-    description=(
-        "API per la gestione degli utenti tramite Amazon Cognito.\n\n"
-        "Questa API offre endpoint per la registrazione, autenticazione, "
-        "verifica del token, conferma della registrazione, invio di un nuovo codice di conferma, "
-        "aggiornamento degli attributi utente, la visualizzazione delle informazioni utente "
-        "e dello schema attributi, e un esempio di endpoint per modificare lo schema (non supportato)."
-    ),
-    version="1.0.0"
-)
-
-# ----------------------------------
-# Configurazioni per Amazon Cognito
-# ----------------------------------
-REGION = "eu-north-1"  # Modifica in base alla tua regione
-CLIENT_ID = "7gp9s0b5nli705a97qik32l1mi"
-CLIENT_SECRET = "4l1nfigk9abonrhkoonqnlo769bbs724ja64j8nqniugmsmf0si"
-USER_POOL_ID = "eu-north-1_0dyOzfzna"
-JWKS_URL = f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}/.well-known/jwks.json"
-
-# Crea il client boto3 per Cognito Identity Provider
-cognito_client = boto3.client("cognito-idp", region_name=REGION)
-
-def get_secret_hash(username: str) -> str:
-    """
-    Calcola il SecretHash richiesto da Cognito, ovvero la codifica Base64 dell'HMAC-SHA256
-    del messaggio (username + CLIENT_ID) firmato con il CLIENT_SECRET.
-    """
-    message = username + CLIENT_ID
-    digest = hmac.new(
-        CLIENT_SECRET.encode("utf-8"),
-        message.encode("utf-8"),
-        digestmod=hashlib.sha256
-    ).digest()
-    return base64.b64encode(digest).decode()
-
-# ----------------------------------
-# Modelli di input per gli endpoint
-# ----------------------------------
-class SignUpRequest(BaseModel):
-    username: str = Field(..., description="Nome utente per la registrazione")
-    password: str = Field(..., description="Password per l'utente")
-    email: str = Field(..., description="Indirizzo email dell'utente")
-
-class SignInRequest(BaseModel):
-    username: str = Field(..., description="Nome utente per l'autenticazione")
-    password: str = Field(..., description="Password dell'utente")
-
-class ConfirmSignUpRequest(BaseModel):
-    username: str = Field(..., description="Nome utente da confermare")
-    confirmation_code: str = Field(..., description="Codice di conferma ricevuto via email")
-
-class AdminConfirmSignUpRequest(BaseModel):
-    username: str = Field(..., description="Nome utente da confermare (tramite operazione amministrativa)")
-
-class ResendConfirmationCodeRequest(BaseModel):
-    username: str = Field(..., description="Nome utente per cui inviare il nuovo codice di conferma")
-
-class UserAttribute(BaseModel):
-    Name: str = Field(..., description="Nome dell'attributo (es. 'email' o 'custom:department')")
-    Value: str = Field(..., description="Valore dell'attributo")
-
-class UpdateAttributesRequest(BaseModel):
-    access_token: str = Field(..., description="Token di accesso dell'utente")
-    attributes: List[UserAttribute] = Field(..., description="Lista degli attributi da aggiornare")
-
-class AccessTokenRequest(BaseModel):
-    access_token: str = Field(..., description="Access token dell'utente")
-
-# ----------------------------------
-# Endpoint (Signup, Signin, ecc.)
-# ----------------------------------
-
-@app.post("/signup", summary="Registrazione utente", response_description="Risposta di registrazione da Cognito")
-async def signup(request_data: SignUpRequest):
-    """
-    Registra un nuovo utente in Amazon Cognito inviando username, password e email.
-    """
-    try:
-        response = cognito_client.sign_up(
-            ClientId=CLIENT_ID,
-            Username=request_data.username,
-            Password=request_data.password,
-            SecretHash=get_secret_hash(request_data.username),
-            UserAttributes=[
-                {"Name": "email", "Value": request_data.email}
-            ]
-        )
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/signin", summary="Autenticazione utente", response_description="Token e informazioni di autenticazione")
-async def signin(request_data: SignInRequest):
-    """
-    Autentica un utente utilizzando il flusso USER_PASSWORD_AUTH di Cognito.
-    """
-    try:
-        response = cognito_client.initiate_auth(
-            ClientId=CLIENT_ID,
-            AuthFlow="USER_PASSWORD_AUTH",
-            AuthParameters={
-                "USERNAME": request_data.username,
-                "PASSWORD": request_data.password,
-                "SECRET_HASH": get_secret_hash(request_data.username)
-            }
-        )
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/confirm-signup", summary="Conferma registrazione utente (Admin)", response_description="Messaggio di conferma")
-async def confirm_signup(request_data: AdminConfirmSignUpRequest):
-    """
-    Conferma la registrazione di un utente tramite operazione amministrativa (admin_confirm_sign_up).
-    """
-    try:
-        response = cognito_client.admin_confirm_sign_up(
-            UserPoolId=USER_POOL_ID,
-            Username=request_data.username
-        )
-        return {"message": f"User {request_data.username} confirmed successfully.", "response": response}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/confirm-signup-user", summary="Conferma registrazione utente", response_description="Risposta di conferma da Cognito")
-async def confirm_signup_user(request_data: ConfirmSignUpRequest):
-    """
-    Conferma la registrazione di un utente inserendo il codice di conferma ricevuto via email (confirm_sign_up).
-    """
-    try:
-        response = cognito_client.confirm_sign_up(
-            ClientId=CLIENT_ID,
-            Username=request_data.username,
-            ConfirmationCode=request_data.confirmation_code,
-            SecretHash=get_secret_hash(request_data.username)
-        )
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/resend-confirmation-code", summary="Invia nuovamente il codice di conferma", response_description="Risposta dall'invio del codice di conferma")
-async def resend_confirmation_code(request_data: ResendConfirmationCodeRequest):
-    """
-    Invia nuovamente il codice di conferma, nel caso l'utente non abbia ricevuto il primo.
-    """
-    try:
-        response = cognito_client.resend_confirmation_code(
-            ClientId=CLIENT_ID,
-            Username=request_data.username,
-            SecretHash=get_secret_hash(request_data.username)
-        )
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/update-attributes", summary="Aggiorna attributi utente", response_description="Risposta dall'aggiornamento degli attributi")
-async def update_attributes(request_data: UpdateAttributesRequest):
-    """
-    Aggiorna gli attributi di un utente autenticato, fornendo il token di accesso e la lista di attributi (Name, Value).
-    """
-    try:
-        response = cognito_client.update_user_attributes(
-            AccessToken=request_data.access_token,
-            UserAttributes=[attr.dict() for attr in request_data.attributes]
-        )
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-# ----------------------------------
-# Endpoint get_user_info: ottiene informazioni utente da AccessToken
-# ----------------------------------
-@app.get("/user-info", summary="Visualizza informazioni utente", response_description="Informazioni complete dell'utente")
-async def get_user_info(
-    access_token_request: AccessTokenRequest = Body(..., description="Payload contenente l'access token dell'utente")
-):
-    """
-    Restituisce tutte le informazioni dell'utente (attributi standard e custom)
-    utilizzando l'access token fornito nel body della richiesta.
-    """
-    try:
-        response = cognito_client.get_user(AccessToken=access_token_request.access_token)
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-# ----------------------------------
-# Endpoint per la verifica del token JWT
-# ----------------------------------
-@app.get("/verify-token", summary="Verifica token JWT", response_description="Token decodificato")
-async def verify_token(
-    token_input: str = Body(..., description="Il token JWT da decodificare e verificare")
-):
-    """
-    Verifica e decodifica un token JWT emesso da Cognito, scaricando le JWKS pubbliche.
-    """
-    token = token_input
-    try:
-        jwks = requests.get(JWKS_URL).json()["keys"]
-        unverified_headers = jwt.get_unverified_headers(token)
-        kid = unverified_headers.get("kid")
-        if not kid:
-            raise HTTPException(status_code=400, detail="kid non presente nell'header del token.")
-
-        key = next((key for key in jwks if key["kid"] == kid), None)
-        if key is None:
-            raise HTTPException(status_code=400, detail="Chiave non trovata.")
-        decoded_token = jwt.decode(
-            token,
-            key,
-            algorithms=["RS256"],
-            audience=CLIENT_ID,
-            issuer=f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}"
-        )
-        return decoded_token
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-# ----------------------------------
-# Endpoint per visualizzare lo schema degli attributi
-# ----------------------------------
-@app.get("/attribute-schema", summary="Visualizza schema degli attributi", response_description="Schema corrente degli attributi del pool")
-async def get_attribute_schema():
-    """
-    Restituisce lo schema corrente degli attributi definiti nel User Pool
-    (standard e custom), utile per capire quali attributi sono disponibili.
-    """
-    try:
-        response = cognito_client.describe_user_pool(UserPoolId=USER_POOL_ID)
-        if "UserPool" in response and "SchemaAttributes" in response["UserPool"]:
-            return response["UserPool"]["SchemaAttributes"]
-        else:
-            return {"message": "SchemaAttributes non disponibili per questo User Pool."}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-# ----------------------------------
-# Endpoint per "modificare" lo schema degli attributi (non supportato da Cognito)
-# ----------------------------------
-@app.post("/update-attribute-schema", summary="Modifica schema degli attributi", response_description="Risposta dall'aggiornamento dello schema")
-async def update_attribute_schema():
-    """
-    Endpoint di esempio. Cognito non permette di modificare lo schema degli attributi
-    dopo la creazione del User Pool, quindi restituirà un errore 501 (Not Implemented).
-    """
-    raise HTTPException(
-        status_code=501,
-        detail="Modifica dello schema degli attributi non è supportata da Cognito dopo la creazione del pool."
-    )
-
-# ----------------------------------
-# Avvio dell'applicazione
-# ----------------------------------
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+È disponibile la **documentazione Swagger** all’indirizzo:  
+```
+http://localhost:8000/docs
+```
+e la **documentazione Redoc** (alternativa) all’indirizzo:  
+```
+http://localhost:8000/redoc
 ```
 
 ---
 
-### 4.2. Avvio dell’applicazione
+## 2. <a name="architettura"></a>Architettura e File Principali
 
-1. **Salva il file** (es. `main.py`).  
-2. **Esegui con Uvicorn**:  
+1. **`main.py`**: 
+   - Crea l’oggetto `FastAPI`.
+   - Include i tre router: `user_router`, `admin_router`, `mfa_router`.
+   - Aggiunge eventuali middleware, come `CORSMiddleware`.
+   - Avvia il server (con `uvicorn.run`).
+
+2. **`user.py`**: 
+   - Contiene il router `user_router` (prefisso `/v1/user`, tag `"User Operations"`).
+   - Gestisce gli endpoint di registrazione, autenticazione, gestione attributi, reset password, ecc.
+
+3. **`admin.py`**: 
+   - Contiene il router `admin_router` (prefisso `/v1/admin`, tag `"Admin Operations"`).
+   - Fornisce endpoint per confermare manualmente un utente (`admin_confirm_sign_up`), visualizzare schema attributi, ecc.
+
+4. **`mfa.py`**:
+   - Contiene il router `mfa_router` (prefisso `/v1/user/mfa`, tag `"User MFA"`).
+   - Gestisce l’abilitazione/disabilitazione MFA (SMS/TOTP), la “challenge” MFA in fase di login, ecc.
+
+Ogni file definisce le **configurazioni di Cognito** (REGION, CLIENT_ID, CLIENT_SECRET, USER_POOL_ID), più eventuali modelli Pydantic e funzioni di supporto (`get_secret_hash`).
+
+---
+
+## 3. <a name="setup"></a>Setup e Avvio dell’Applicazione
+
+1. **Clona o scarica** i file `main.py`, `user.py`, `admin.py`, `mfa.py` all’interno di un progetto Python.
+2. **Installa le dipendenze**:
+   ```bash
+   pip install fastapi uvicorn boto3 python-jose requests
+   ```
+3. **Configura** le credenziali AWS (tramite `~/.aws/credentials`, variabili d’ambiente o ruoli IAM).
+4. **Verifica** che `REGION`, `CLIENT_ID`, `CLIENT_SECRET`, `USER_POOL_ID` siano impostati correttamente (se diverso, modificali all’inizio di `user.py`, `admin.py`, `mfa.py`).
+5. **Avvia** il server:
+   ```bash
+   python main.py
+   ```
+   Per ambiente di sviluppo (auto-reload), puoi usare:
    ```bash
    uvicorn main:app --reload
    ```
-3. **Test e documentazione Swagger**  
-   - Apri il browser all’indirizzo `http://localhost:8000/docs`.  
-   - Troverai un’interfaccia interattiva per testare gli endpoint.
 
 ---
 
-## 5. Gestione degli Errori Comuni e Debug
+## 4. <a name="router-user"></a>Router “User”
 
-1. **`NotAuthorizedException` / `SECRET_HASH was not received`**  
-   - Significa che il tuo App Client in Cognito ha un client secret configurato, per cui è necessario calcolare e passare il `SecretHash`.
-2. **`InvalidParameterException: USER_PASSWORD_AUTH flow not enabled for this client`**  
-   - Devi abilitare il flusso **USER_PASSWORD_AUTH** nelle impostazioni dell’App Client.
-3. **`UserNotConfirmedException: User is not confirmed`**  
-   - L’utente ha completato il signup ma non ha eseguito la conferma via email o SMS.  
-   - Puoi confermare manualmente via `admin_confirm_sign_up` o implementare l’endpoint di conferma con codice.
-4. **Email duplicata**  
-   - Di default, Cognito non impone l’unicità dell’email. Per forzare l’unicità, devi configurare l’email come alias univoco (oppure usare un trigger pre-sign-up per bloccare iscrizioni con la stessa email).
-5. **Attributi custom**  
-   - Cognito richiede il prefisso `custom:` per gli attributi non standard. Se vuoi salvare, ad esempio, `department`, devi definirlo come `custom:department` nel pool.
+### 4.1. Descrizione Generale del Router “User”
+
+- **Prefisso**: `/v1/user`  
+- **Tag**: `"User Operations"`  
+- **Scopo**: Fornire endpoint self-service per utenti, come registrazione, login, gestione attributi, reset password.
+
+### 4.2. Modelli Principali
+
+- **SignUpRequest** (registra un nuovo utente)  
+- **SignInRequest** (autentica utente con username/password)  
+- **ConfirmSignUpRequest** (conferma registrazione con codice)  
+- **ResendConfirmationCodeRequest** (rinvia codice conferma)  
+- **UserAttribute**, **UpdateAttributesRequest** (gestione attributi standard)  
+- **UpdateCustomAttributesRequest** (gestione attributi custom)  
+- **AccessTokenRequest** (usato per operazioni che richiedono un token, come `verify-token`, `user-info`)  
+- **ForgotPasswordRequest** e **ConfirmForgotPasswordRequest** (reset password)  
+- **RefreshTokenRequest** (rinnovo token con `REFRESH_TOKEN_AUTH`)  
+- **ChangePasswordRequest** (cambia password autenticato)  
+- **VerifyAttributeRequest** e **ConfirmAttributeRequest** (verifica attributo come phone_number o email)
+
+### 4.3. Endpoint Principali
+
+1. **`POST /v1/user/signup`**  
+   Registra un utente su Cognito (usa `sign_up`).
+
+2. **`POST /v1/user/signin`**  
+   Effettua login (`initiate_auth` con flusso `USER_PASSWORD_AUTH`).
+
+3. **`POST /v1/user/verify-token`**  
+   Verifica un token JWT (scaricando JWKS).
+
+4. **`POST /v1/user/confirm-signup-user`**  
+   Conferma un utente con codice (self-service).
+
+5. **`POST /v1/user/resend-confirmation-code`**  
+   Rinvia codice di conferma.
+
+6. **`POST /v1/user/update-attributes`** e **`POST /v1/user/update-custom-attributes`**  
+   Aggiorna attributi standard e custom.
+
+7. **`POST /v1/user/user-info`**  
+   Restituisce info utente (attributi).
+
+8. **`POST /v1/user/forgot-password`** e **`POST /v1/user/confirm-forgot-password`**  
+   Flusso di reset password.
+
+9. **`POST /v1/user/refresh-token`**  
+   Rinnova Access/Id Token con `RefreshToken`.
+
+10. **`POST /v1/user/change-password`**  
+   Cambia password sapendo la vecchia (utente autenticato).
+
+11. **`POST /v1/user/verify-user-attribute`** e **`POST /v1/user/confirm-user-attribute`**  
+    Verifica attributo (email/telefono) tramite codice Cognito.
 
 ---
 
-## 6. Best Practices & Suggerimenti
+## 5. <a name="router-admin"></a>Router “Admin”
 
-1. **Sicurezza delle credenziali AWS**  
-   - Non committare le credenziali su repository pubblici.  
-   - Preferisci l’uso di ruoli IAM se l’app gira su un servizio AWS (ad es. EC2, ECS, Lambda).
-2. **Validazione lato server**  
-   - Verifica sempre la lunghezza e la complessità delle password, anche lato backend, soprattutto se gestisci input da fonti non fidate.
-3. **Logging e monitoraggio**  
-   - Utilizza CloudWatch per monitorare i log di Cognito (in caso di errori).  
-   - Considera l’impiego di metriche personalizzate o Amazon Pinpoint se devi analizzare i comportamenti degli utenti.
-4. **Scalabilità**  
-   - Cognito gestisce automaticamente lo scaling per migliaia/milioni di utenti, ma assicurati di avere un design dell’app scalabile e di ottimizzare la gestione dei token.
-5. **Verifica del token JWT**  
-   - Nei microservizi, assicurati di verificare i token `AccessToken` e/o `IdToken` mediante la chiave pubblica (JWKS) di Cognito, in modo da prevenire accessi non autorizzati.
+### 5.1. Descrizione Generale del Router “Admin”
 
----
+- **Prefisso**: `/v1/admin`  
+- **Tag**: `"Admin Operations"`  
+- **Scopo**: Fornire endpoint riservati all’amministratore, per confermare utenti manualmente, visualizzare schema attributi, ecc.
 
-## 7. Conclusioni
+### 5.2. Modello Principale
 
-In questa documentazione abbiamo visto:
+- **AdminConfirmSignUpRequest**: contenente `username` (conferma forzata senza codice).
 
-1. **Come configurare** un account AWS e creare una **User Pool** con Cognito.  
-2. **Come creare** un **App Client** e abilitare i flussi di autenticazione desiderati.  
-3. **Come integrare** Python (con FastAPI) e **boto3** per eseguire operazioni di registrazione, autenticazione, conferma, reinvio del codice di conferma, aggiornamento attributi e verifica token.  
-4. **Come gestire** i token JWT e le possibili problematiche (utenti non confermati, alias email, attributi duplicati, ecc.).  
-5. **Come visualizzare** lo schema degli attributi e **perché** Cognito non supporta la modifica dello schema dopo la creazione.
+### 5.3. Endpoint Principali
 
-Questo set di endpoint e istruzioni copre le esigenze più comuni per la gestione di utenti in un progetto che sfrutta la potenza e la scalabilità di Amazon Cognito.
+1. **`POST /v1/admin/confirm-signup`**  
+   - Usa `admin_confirm_sign_up` per forzare la conferma di un utente.  
+   - Richiede permessi IAM sufficienti.
+
+2. **`GET /v1/admin/attribute-schema`**  
+   - Usa `describe_user_pool` per mostrare lo schema attributi (standard + custom).
+
+3. **`POST /v1/admin/update-attribute-schema`**  
+   - Restituisce errore 501 perché Cognito **non** supporta la modifica dello schema dopo la creazione.
 
 ---
 
-**Hai ulteriori domande o richieste di approfondimento?** Sentiti libero di chiedere ulteriori chiarimenti su argomenti specifici, flussi di autenticazione avanzati (SRP, OAuth2), integrazione con social login (Google, Facebook, ecc.) o su come personalizzare ulteriormente la User Pool. Buon sviluppo!
+## 6. <a name="router-mfa"></a>Router “MFA”
+
+### 6.1. Descrizione Generale del Router “MFA”
+
+- **Prefisso**: `/v1/user/mfa`  
+- **Tag**: `"User MFA"`  
+- **Scopo**: Gestione MFA (SMS e TOTP), oltre all’eventuale challenge.
+
+### 6.2. Modelli Principali
+
+1. **EnableSmsMfaRequest**: `(access_token, phone_number)` per abilitare SMS MFA (telefono già verificato).  
+2. **DisableMfaRequest**: `(access_token)` per disabilitare SMS/TOTP.  
+3. **AssociateSoftwareTokenRequest**: `(access_token)` per associare TOTP e ottenere `SecretCode`.  
+4. **VerifySoftwareTokenRequest**: `(access_token, code, friendly_device_name)` per validare TOTP.  
+5. **AccessTokenOnlyRequest**: `(access_token)` minimal.  
+6. **MfaRespondChallengeRequest**: `(session, challenge_name, username, code)` per rispondere a challenge MFA se Cognito lo richiede in fase di login.
+
+### 6.3. Endpoint Principali
+
+1. **`POST /v1/user/mfa/respond-challenge`**  
+   - Risponde a un challenge MFA (`SMS_MFA` o `SOFTWARE_TOKEN_MFA`) dopo `initiate_auth`.
+
+2. **`POST /v1/user/mfa/enable-sms-mfa`**  
+   - Abilita SMS MFA (`set_user_mfa_preference` con `SMSMfaSettings`).
+
+3. **`POST /v1/user/mfa/disable-sms-mfa`**  
+   - Disabilita SMS MFA.
+
+4. **`POST /v1/user/mfa/associate-software-token`**  
+   - Associa un TOTP, restituendo `SecretCode` base32.
+
+5. **`POST /v1/user/mfa/verify-software-token`**  
+   - Verifica che il codice TOTP sia corretto.
+
+6. **`POST /v1/user/mfa/enable-software-mfa`** e **`POST /v1/user/mfa/disable-software-mfa`**  
+   - Abilita/disabilita TOTP MFA (impostandola come preferita o disattivandola).
+
+---
+
+## 7. <a name="esempi-di-utilizzo"></a>Esempi di Utilizzo via cURL/Postman
+
+### 7.1. Registrazione e Conferma
+
+```bash
+# 1) Signup
+curl -X POST http://localhost:8000/v1/user/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username":"testuser",
+    "password":"Password123!",
+    "email":"testuser@example.com"
+  }'
+
+# 2) L'utente riceve un codice (via email)
+# 3) Conferma
+curl -X POST http://localhost:8000/v1/user/confirm-signup-user \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username":"testuser",
+    "confirmation_code":"123456"
+  }'
+```
+
+### 7.2. Login (Sign-in)
+
+```bash
+curl -X POST http://localhost:8000/v1/user/signin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username":"testuser",
+    "password":"Password123!"
+  }'
+```
+**Risposta**: conterrà `AccessToken`, `IdToken`, `RefreshToken`.
+
+### 7.3. Aggiornare attributi custom
+
+```bash
+curl -X POST http://localhost:8000/v1/user/update-custom-attributes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "access_token": "eyJraWQiOiJr... (omissis)",
+    "custom_attributes": {
+      "custom:department": "IT",
+      "custom:role": "Developer"
+    }
+  }'
+```
+
+### 7.4. Gestione MFA (SMS)
+
+```bash
+# Abilita SMS MFA, assumendo phone_number già verificato.
+curl -X POST http://localhost:8000/v1/user/mfa/enable-sms-mfa \
+  -H "Content-Type: application/json" \
+  -d '{
+    "access_token":"eyJraWQiOiJr...(omissis)",
+    "phone_number":"+391234567890"
+  }'
+```
+
+### 7.5. Conferma Utente in modo Admin
+
+```bash
+curl -X POST http://localhost:8000/v1/admin/confirm-signup \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser"}'
+```
+
+---
+
+## 8. <a name="best-practices"></a>Considerazioni su Sicurezza e Best Practices
+
+1. **Protezione degli Endpoint Admin**  
+   - Gli endpoint `/v1/admin` consentono operazioni sensibili (es. `admin_confirm_sign_up`). Assicurati di implementarli dietro un meccanismo di autorizzazione (ad es. JWT Admin, VPN interna, IP whitelisting).
+2. **Gestione dei Token**  
+   - Non salvare in chiaro i token JWT. Verifica la firma con **python-jose** o implementa l’endpoint `/verify-token`.
+3. **MFA**  
+   - Se vuoi **richiedere** MFA, configuralo come “Required” nella User Pool o abilitalo come “Optional” e poi imposta `PreferredMfa` via endpoint.  
+   - Usa `Device Tracking` e `ConfirmDevice` se desideri “ricordare” dispositivi e saltare MFA su dispositivi fidati.
+4. **Log e Monitoring**  
+   - Utilizza CloudWatch per tracciare i log di errori e le chiamate.  
+   - Configura allarmi se superi certe soglie di errori (ad es. troppi `NotAuthorizedException`).
+5. **Alto traffico**  
+   - Se prevedi un traffico elevato, verifica i limiti di Cognito. Sfrutta token e caching delle JWKS.
+
+---
+
+## 9. <a name="errori-comuni"></a>Errori Comuni e Soluzioni
+
+- **`NotAuthorizedException`**: Se il client richiede il `SecretHash` ma non è stato inviato, controlla `get_secret_hash`.
+- **`UserNotConfirmedException`**: L’utente non ha completato la conferma → usa `/confirm-signup-user` o `/v1/admin/confirm-signup`.
+- **`InvalidParameterException: USER_PASSWORD_AUTH flow not enabled`**: Abilita `USER_PASSWORD_AUTH` nell’App Client.
+- **`Modifica schema attributi non supportata`**: Cognito non permette di modificare lo schema dopo la creazione → endpoint `/update-attribute-schema` ritorna 501.
+
+---
+
+## 10. <a name="conclusioni"></a>Conclusioni
+
+Con questa documentazione, disponi di:
+
+- **Un’API completa** che copre registrazione, conferma, login, reset password, gestione attributi, e MFA (SMS/TOTP).  
+- **Tre router** separati (`user`, `admin`, `mfa`) per rispettare le responsabilità: self-service vs. admin vs. multi-factor.  
+- **Esempi** di chiamate via cURL e linee guida su come installare e lanciare l’applicazione.
+
+Se desideri estendere ulteriormente l’API:
+
+1. **Aggiungi** funzioni avanzate di device tracking (ricorda dispositivi).  
+2. **Proteggi** gli endpoint con un sistema di autorizzazione robusto.  
+3. **Integra** provider social (Google, Facebook) con Cognito se necessario.  
