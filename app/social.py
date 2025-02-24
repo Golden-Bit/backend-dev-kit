@@ -1,99 +1,116 @@
-# social.py
-
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel, Field
-import boto3
-import hmac
-import hashlib
-import base64
 import urllib.parse
+import requests
+from app.utilities import load_cognito_config
 
-from app.utilities import load_cognito_config  # Carica la config dal file config.py
 
-# Carichiamo la config da config.json
+# Caricamento della configurazione da un file JSON (config.json) tramite config.py
 cognito_config = load_cognito_config("app/config.json")
 REGION = cognito_config["REGION"]
 CLIENT_ID = cognito_config["CLIENT_ID"]
 CLIENT_SECRET = cognito_config["CLIENT_SECRET"]
 USER_POOL_ID = cognito_config["USER_POOL_ID"]
 
-# Cognito domain (assicurati di configurare un dominio nella user pool, es. "myapp.auth.eu-north-1.amazoncognito.com")
-COGNITO_DOMAIN = "myapp.auth.eu-north-1.amazoncognito.com"  # Esempio, da modificare
+# Imposta il dominio Cognito configurato (deve essere definito nella console Cognito)
+# Esempio: "myapp.auth.eu-north-1.amazoncognito.com"
+COGNITO_DOMAIN = "myapp.auth.eu-north-1.amazoncognito.com"
 
 social_router = APIRouter(
     prefix="/v1/user/social",
     tags=["User Social Login"]
 )
 
-
 class SocialLoginRequest(BaseModel):
     """
-    Modello per specificare il provider di social login (es. 'Google', 'Facebook', ecc.).
+    Modello per specificare il provider di social login.
+
+    Attributes:
+        provider (str): Nome del provider. Deve corrispondere a quanto configurato in Cognito (es. "Google", "Facebook").
     """
     provider: str = Field(..., description="Nome del provider (Google, Facebook, Apple, Amazon, etc.)")
 
-
-@social_router.get("/login", summary="Avvia login con provider terzo (Hosted UI)")
-async def social_login(provider: str):
+@social_router.get("/login-redirect", summary="Avvia il login social con redirect", response_description="Reindirizza al Hosted UI di Cognito")
+async def social_login_redirect(provider: str):
     """
-    Esempio di endpoint per reindirizzare l'utente al Hosted UI di Cognito,
-    selezionando un provider di federazione (Google, Facebook, etc.).
+    Reindirizza l'utente al Cognito Hosted UI per l'autenticazione tramite un provider esterno.
 
-    Flow: L'utente viene redirectato a Cognito Hosted UI -> login provider -> callback su /callback
+    Query Parameters:
+        - provider: Nome del provider (es. "Google", "Facebook"). Deve corrispondere a quanto configurato in Cognito.
+
+    Flow:
+        1. Costruisce l'URL di autorizzazione di Cognito con i parametri necessari:
+           - client_id, response_type=code, scope, redirect_uri, identity_provider.
+        2. Restituisce un RedirectResponse verso l'URL di Hosted UI.
     """
-    # Esempio: costruiamo l'URL di Hosted UI con querystring
-    # Parametri principali: client_id, redirect_uri, response_type=code, identity_provider=...
-    # ASSUMIAMO di avere redirect_uri configurata in Cognito come "http://localhost:8000/v1/user/social/callback"
-
     redirect_uri = "http://localhost:8000/v1/user/social/callback"
     base_auth_url = f"https://{COGNITO_DOMAIN}/oauth2/authorize"
-
-    # identity_provider deve corrispondere al nome del provider configurato in Cognito (es. "Facebook", "Google")
     query_params = {
         "client_id": CLIENT_ID,
         "response_type": "code",
-        "scope": "email openid profile",  # Aggiungi scope necessari
+        "scope": "openid email profile",  # Modifica gli scope secondo le tue necessità
         "redirect_uri": redirect_uri,
-        "identity_provider": provider  # deve combaciare con la config in Cognito
+        "identity_provider": provider
     }
-
     url_with_params = base_auth_url + "?" + urllib.parse.urlencode(query_params)
     return RedirectResponse(url_with_params)
 
+@social_router.get("/login-url", summary="Restituisce URL per login social", response_description="URL di login social come stringa")
+async def social_login_url(provider: str):
+    """
+    Restituisce l'URL per il login social (Hosted UI) come JSON, senza eseguire un redirect.
 
-@social_router.get("/callback", summary="Callback dopo login con provider terzo")
+    Query Parameters:
+        - provider: Nome del provider (es. "Google", "Facebook").
+
+    Questo endpoint consente al client di ottenere l'URL e poi gestire il redirect lato client.
+
+    Returns:
+        JSON contenente "login_url".
+    """
+    redirect_uri = "http://localhost:8000/v1/user/social/callback"
+    base_auth_url = f"https://{COGNITO_DOMAIN}/oauth2/authorize"
+    query_params = {
+        "client_id": CLIENT_ID,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "redirect_uri": redirect_uri,
+        "identity_provider": provider
+    }
+    url_with_params = base_auth_url + "?" + urllib.parse.urlencode(query_params)
+    return JSONResponse(content={"login_url": url_with_params})
+
+@social_router.get("/callback", summary="Endpoint di callback per il social login", response_description="Token OAuth2 scambiati con Cognito")
 async def social_callback(code: str, state: str = None):
     """
-    Endpoint di callback che Cognito invoca dopo che l'utente ha effettuato
-    l'accesso con un provider esterno (Google, Facebook, ecc.) via Hosted UI.
+    Endpoint di callback per il login social.
 
-    Il param 'code' è usato per scambiare il token con Cognito.
+    Dopo che l'utente si è autenticato tramite il provider esterno,
+    Cognito reindirizza l'utente a questo endpoint con un parametro 'code'.
+
+    Query Parameters:
+        - code: Codice di autorizzazione da scambiare per i token.
+        - state: (Opzionale) Parametro di stato per protezione CSRF.
+
+    Flow:
+        1. Scambia il codice con Cognito chiamando l'endpoint /oauth2/token.
+        2. Restituisce i token (AccessToken, IdToken, RefreshToken) in formato JSON.
     """
-    # Esempio di come scambiare il code con i token
     token_url = f"https://{COGNITO_DOMAIN}/oauth2/token"
     redirect_uri = "http://localhost:8000/v1/user/social/callback"
-
     data = {
         "grant_type": "authorization_code",
         "client_id": CLIENT_ID,
         "code": code,
-        "redirect_uri": redirect_uri
+        "redirect_uri": redirect_uri,
+        "client_secret": CLIENT_SECRET  # Necessario se il client è configurato con secret
     }
-    # Se hai il secret, potresti dover inviare Authorization Basic, oppure form param "client_secret" ...
-    # Qui assumiamo che l'App Client non generi segreto. Se lo generasse, occorrerebbe l'header Basic o param client_secret.
-    data["client_secret"] = CLIENT_SECRET  # se necessario
-
-    import requests
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     try:
         resp = requests.post(token_url, data=data, headers=headers)
         resp.raise_for_status()
         tokens = resp.json()
-        # tokens conterrà AccessToken, IdToken, RefreshToken, ...
-        return {
-            "message": "Login social completato con successo",
-            "tokens": tokens
-        }
+        return tokens
     except requests.RequestException as e:
         raise HTTPException(status_code=400, detail=str(e))
