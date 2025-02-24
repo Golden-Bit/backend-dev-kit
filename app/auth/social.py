@@ -3,7 +3,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel, Field
 import urllib.parse
 import requests
-from app.utilities import load_cognito_config
+from app.auth.utilities import load_cognito_config
 
 
 # Caricamento della configurazione da un file JSON (config.json) tramite config.py
