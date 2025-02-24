@@ -32,7 +32,7 @@ app = FastAPI(
         "con flusso di callback e scambio del 'code'.\n\n"
         "Per maggiori dettagli, esplora la sezione **Docs** all'indirizzo `/docs` e la sezione **Redoc** all'indirizzo `/redoc`."
     ),
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Inclusione dei router esistenti

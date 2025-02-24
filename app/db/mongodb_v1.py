@@ -13,7 +13,7 @@ MONGO_SERVICE_URL = config_dict["mongodb_service_url"]
 AUTH_SERVICE_URL = "http://localhost:8000/v1/user"  # endpoint della nuova API di autenticazione
 
 router = APIRouter(
-    prefix="/mongo",
+    prefix="/v2/mongo",
     tags=["MongoDB Management"],
     responses={404: {"description": "Not found"}},
 )
