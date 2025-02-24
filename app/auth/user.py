@@ -9,7 +9,7 @@ from jose import jwt
 import hmac
 import hashlib
 import base64
-from app.utilities import load_cognito_config
+from app.auth.utilities import load_cognito_config
 
 # ---------------------------
 # Configurazioni per Cognito

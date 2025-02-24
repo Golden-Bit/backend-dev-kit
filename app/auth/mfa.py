@@ -6,7 +6,7 @@ import hashlib
 import base64
 import requests
 
-from app.utilities import load_cognito_config
+from app.auth.utilities import load_cognito_config
 
 # ---------------------------
 # Configurazioni per Cognito

@@ -7,14 +7,14 @@ import hmac
 import hashlib
 import base64
 
-from app.utilities import load_cognito_config
+from app.auth.utilities import load_cognito_config
 
 # ---------------------------
 # Configurazioni per Cognito
 # ---------------------------
 
 # Carica la config
-cognito_config = load_cognito_config("app/config.json")
+cognito_config = load_cognito_config("app/auth/config.json")
 
 REGION = cognito_config["REGION"]
 CLIENT_ID = cognito_config["CLIENT_ID"]
