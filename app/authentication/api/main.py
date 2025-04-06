@@ -33,6 +33,7 @@ app = FastAPI(
         "Per maggiori dettagli, esplora la sezione **Docs** all'indirizzo `/docs` e la sezione **Redoc** all'indirizzo `/redoc`."
     ),
     version="1.0.0",
+    root_path="/auth"
 )
 
 # Inclusione dei router esistenti
