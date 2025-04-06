@@ -1,4 +1,4 @@
 {
-  "mongodb_service_url": "https://teatek-llm.theia-innovation.com/database/v1/mongo",
+  "mongodb_service_url": "https://teatek-llm.theia-innovation.com/mongodb-api",
   "auth_service_url": "https://teatek-llm.theia-innovation.com/auth/v1/user"
 }
