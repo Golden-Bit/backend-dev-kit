@@ -29,7 +29,7 @@ USER_POOL_ID = cognito_config["USER_POOL_ID"]
 ### 2.2. Definizione del Dominio Cognito
 
 ```python
-COGNITO_DOMAIN = "myapp.auth.eu-north-1.amazoncognito.com"
+COGNITO_DOMAIN = "myapp.authentication.eu-north-1.amazoncognito.com"
 ```
 
 **Cosa fa:**  

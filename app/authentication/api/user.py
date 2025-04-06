@@ -1,22 +1,23 @@
 # user.py
+import json
 
 from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from typing import List, Dict, Any
 import boto3
 import requests
 from jose import jwt
 import hmac
 import hashlib
 import base64
-from app.auth.utilities import load_cognito_config
+from app.authentication.api.utilities import load_cognito_config
 
 # ---------------------------
 # Configurazioni per Cognito
 # ---------------------------
 
 # Carica la config
-cognito_config = load_cognito_config("app/config.json")
+cognito_config = load_cognito_config("app/authentication/api/config.json")
 
 REGION = cognito_config["REGION"]
 CLIENT_ID = cognito_config["CLIENT_ID"]
@@ -107,7 +108,7 @@ class UserAttribute(BaseModel):
         Value (str): Valore dell'attributo.
     """
     Name: str = Field(..., description="Nome dell'attributo")
-    Value: str = Field(..., description="Valore dell'attributo")
+    Value: Any = Field(..., description="Valore dell'attributo")
 
 
 class UpdateAttributesRequest(BaseModel):
@@ -129,7 +130,7 @@ class UpdateCustomAttributesRequest(BaseModel):
     **Nota:** Le chiavi del dizionario devono includere il prefisso 'custom:'.
     """
     access_token: str = Field(..., description="Token di accesso dell'utente")
-    custom_attributes: Dict[str, str] = Field(
+    custom_attributes: Dict[str, Any] = Field(
         ...,
         description=(
             "Dizionario degli attributi customizzati da aggiornare, "
@@ -228,8 +229,6 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., description="Nuova password da impostare")
 
 
-from pydantic import BaseModel, Field
-
 class VerifyAttributeRequest(BaseModel):
     """
     Modello per avviare la verifica di un attributo utente in Cognito
@@ -256,7 +255,6 @@ class ConfirmAttributeRequest(BaseModel):
     access_token: str = Field(..., description="Access token dell'utente.")
     attribute_name: str = Field(..., description="Nome dell'attributo, es. 'phone_number' o 'email'.")
     confirmation_code: str = Field(..., description="Codice di verifica ricevuto via SMS o email.")
-
 
 # ---------------------------
 # CREAZIONE ROUTER USER
@@ -409,7 +407,7 @@ async def update_attributes(request_data: UpdateAttributesRequest):
     try:
         response = cognito_client.update_user_attributes(
             AccessToken=request_data.access_token,
-            UserAttributes=[attr.dict() for attr in request_data.attributes]
+            UserAttributes=[attr.model_dump() for attr in request_data.attributes]
         )
         return response
     except Exception as e:
@@ -418,13 +416,19 @@ async def update_attributes(request_data: UpdateAttributesRequest):
 
 @user_router.post("/update-custom-attributes", summary="Aggiorna attributi customizzati", response_description="Risposta dall'aggiornamento degli attributi customizzati")
 async def update_custom_attributes(request_data: UpdateCustomAttributesRequest):
-    """
-    Aggiorna attributi customizzati per un utente.
-
-    **Nota:** Assicurati che gli attributi custom siano già definiti nella User Pool e che il nome includa il prefisso 'custom:'.
-    """
     try:
-        attributes = [{"Name": key, "Value": value} for key, value in request_data.custom_attributes.items()]
+        attributes = []
+        for key, val in request_data.custom_attributes.items():
+            # Se val è dict o list, converti in stringa JSON
+            if isinstance(val, (dict, list)):
+                val_str = json.dumps(val)
+            else:
+                # Altrimenti lo converti in stringa semplice
+                # (in modo da unificare il tipo)
+                val_str = str(val)
+
+            attributes.append({"Name": key, "Value": val_str})
+
         response = cognito_client.update_user_attributes(
             AccessToken=request_data.access_token,
             UserAttributes=attributes
@@ -435,16 +439,30 @@ async def update_custom_attributes(request_data: UpdateCustomAttributesRequest):
 
 
 @user_router.post("/user-info", summary="Visualizza informazioni utente", response_description="Informazioni complete dell'utente")
-async def get_user_info(
-    access_token_request: AccessTokenRequest = Body(..., description="Payload contenente l'access token dell'utente")
-):
-    """
-    Restituisce tutte le informazioni dell'utente (attributi standard e custom)
-    utilizzando l'access token fornito nel body della richiesta.
-    """
+async def get_user_info(access_token_request: AccessTokenRequest):
     try:
         response = cognito_client.get_user(AccessToken=access_token_request.access_token)
+
+        # response contiene "UserAttributes"
+        user_attributes = response.get("UserAttributes", [])
+
+        for attr in user_attributes:
+            val = attr.get("Value")
+            if val is None:
+                continue
+
+            # Prova a fare loads; se fallisce, significa che non è un JSON valido
+            try:
+                attr["Value"] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                # Non è JSON, quindi lo lasci come semplice stringa
+                pass
+
+        # Se vuoi restituire l'oggetto "pulito", potresti anche ridefinire
+        # response["UserAttributes"] = user_attributes
+
         return response
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from app.db.mongodb_v1 import router as mongo_router_v1
-from app.db.mongodb_v2 import router as mongo_router_v2
+from app.database.api.mongodb_v1 import router as mongo_router_v1
+#from app.database.api.mongodb_v2 import router as mongo_router_v2
 
 
 # Create the FastAPI application instance
@@ -14,7 +14,7 @@ app = FastAPI(
         "e garantisce l'accesso sicuro ai database."
     ),
     version="1.0.0",
-    root_path="/db"
+    root_path="/database"
 )
 
 # Configure CORS to allow all origins, credentials, methods, and headers
@@ -28,7 +28,7 @@ app.add_middleware(
 
 # Include the MongoDB management router in the application
 app.include_router(mongo_router_v1)
-app.include_router(mongo_router_v2)
+#app.include_router(mongo_router_v2)
 
 # Additional routers (e.g., authentication routes) can be included here if needed
 # from app.auth_route import router as auth_router
@@ -36,4 +36,4 @@ app.include_router(mongo_router_v2)
 
 if __name__ == "__main__":
     # Run the application using uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)

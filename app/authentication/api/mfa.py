@@ -4,16 +4,15 @@ import boto3
 import hmac
 import hashlib
 import base64
-import requests
 
-from app.auth.utilities import load_cognito_config
+from app.authentication.api.utilities import load_cognito_config
 
 # ---------------------------
 # Configurazioni per Cognito
 # ---------------------------
 
 # Carica la config
-cognito_config = load_cognito_config("app/config.json")
+cognito_config = load_cognito_config("app/authentication/api/config.json")
 
 REGION = cognito_config["REGION"]
 CLIENT_ID = cognito_config["CLIENT_ID"]

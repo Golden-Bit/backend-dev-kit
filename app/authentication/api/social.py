@@ -3,19 +3,19 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel, Field
 import urllib.parse
 import requests
-from app.auth.utilities import load_cognito_config
+from app.authentication.api.utilities import load_cognito_config
 
 
 # Caricamento della configurazione da un file JSON (config.json) tramite config.py
-cognito_config = load_cognito_config("app/config.json")
+cognito_config = load_cognito_config("app/authentication/api/config.json")
 REGION = cognito_config["REGION"]
 CLIENT_ID = cognito_config["CLIENT_ID"]
 CLIENT_SECRET = cognito_config["CLIENT_SECRET"]
 USER_POOL_ID = cognito_config["USER_POOL_ID"]
 
 # Imposta il dominio Cognito configurato (deve essere definito nella console Cognito)
-# Esempio: "myapp.auth.eu-north-1.amazoncognito.com"
-COGNITO_DOMAIN = "myapp.auth.eu-north-1.amazoncognito.com"
+# Esempio: "myapp.authentication.eu-north-1.amazoncognito.com"
+COGNITO_DOMAIN = "myapp.authentication.eu-north-1.amazoncognito.com"
 
 social_router = APIRouter(
     prefix="/v1/user/social",

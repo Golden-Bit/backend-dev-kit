@@ -4,10 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import dei router esistenti
-from app.auth.user import user_router
-from app.auth.admin import admin_router
-from app.auth.mfa import mfa_router
-from app.auth.social import social_router
+from app.authentication.api.user import user_router
+from app.authentication.api.admin import admin_router
+from app.authentication.api.mfa import mfa_router
+from app.authentication.api.social import social_router
 
 app = FastAPI(
     title="Cognito Authentication and MFA API",

@@ -1,0 +1,4 @@
+{
+  "mongodb_service_url": "http://localhost:8094/mongodb-api",
+  "auth_service_url": "http://localhost:8093/v1/user"
+}
