@@ -272,7 +272,7 @@ async def get_items(db_name: str, collection_name: str, filter: Optional[Dict[st
 
 
 
-        return #response.json()
+        return response.json()
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Errore nel recupero dei documenti: " + str(e))
