@@ -1,4 +1,4 @@
 {
-  "mongodb_service_url": "http://localhost:8094/mongodb-api",
-  "auth_service_url": "http://localhost:8093/v1/user"
+  "mongodb_service_url": "https://teatek-llm.theia-innovation.com/database/v1/mongo",
+  "auth_service_url": "https://teatek-llm.theia-innovation.com/auth/v1/user"
 }
